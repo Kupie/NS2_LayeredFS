@@ -10,10 +10,11 @@
 // No writes, no pointer swaps, no injection. All merging/verification is PC-side.
 //
 //   node tools/stage3b-probe.cjs --ounce <OunceCake> --run <ns2jb-run> \
-//        --override <localfile> [--title <16hex>] [--storage 4|5|2] [--path /romfs/path]
+//        --override <localfile> [--title <16hex>] [--storage 4|5|2] [--path /romfs/path] [--update]
 //
 // If --path is omitted, the smallest file in the title is chosen (cheap to verify)
-// and printed so you can see what was picked.
+// and printed so you can see what was picked. --update verifies against the title's
+// composed/patched update romfs instead of base (see README "Scope and boundaries").
 
 const fs = require('node:fs');
 const fmt = require('../src/romfs-format.cjs');
@@ -32,6 +33,7 @@ function parseArgs(argv) {
     else if (a === '--storage') opts.storage = Number(argv[++i]);
     else if (a === '--override') opts.override = argv[++i];
     else if (a === '--path') opts.path = argv[++i];
+    else if (a === '--update') opts.update = true;
     else if (a === '--spot') opts.spot = Number(argv[++i]);
     else throw new Error('unknown option: ' + a);
   }
@@ -170,7 +172,7 @@ async function main() {
   try {
     // Wrap the console reader so large contiguous source reads respect the 0x40000 cap.
     const original = chunkedReader(opened.reader, 0x40000);
-    console.log(`title=${opened.info.title} size=${hex(opened.info.size)}  (read-only; no writes, no injection)\n`);
+    console.log(`title=${opened.info.title} kind=${opened.info.kind} size=${hex(opened.info.size)}  (read-only; no writes, no injection)\n`);
 
     const r = await verify(original, { override: opts.override, path: opts.path, spot: opts.spot });
 
