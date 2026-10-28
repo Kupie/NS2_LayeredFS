@@ -1,0 +1,10 @@
+{
+  "name": "ns2-layeredfs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only romfs asset-override (LayeredFS) layer for personal Switch 2 game modding",
+  "license": "GPL-2.0-only",
+  "scripts": {
+    "test": "node test/stage1.test.cjs"
+  }
+}
