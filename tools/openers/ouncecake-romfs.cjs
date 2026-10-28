@@ -1,66 +1,97 @@
 'use strict';
-// Read-only romfs storage opener, delegated to OunceCake's EXISTING dump path.
+// Read-only romfs storage opener.
 //
-// Stage 1 deliberately does not re-derive the handle-location / registry logic. It
-// reuses OunceCake's established read-only opener (attachGame -> createGameFiles ->
-// open({section:'romfs'})), which already restores whatever temporary state it
-// touches. We only read from the handle it returns. Nothing here writes storage,
-// patches memory, or alters a pointer beyond what OunceCake's own dump flow does.
+// This reimplements, natively in this repo, the base-romfs case of OunceCake's
+// internal createGameFiles.open({section:'romfs'}) using ONLY OunceCake's published
+// exports, so NS2_LayeredFS never requires a patched copy of OunceCake:
 //
-// Point --ounce at a checked-out OunceCake repo; this requires its engine modules
-// from there so there is a single source of truth for the console protocol.
+//   session.cjs : attachGame                         (exported)
+//   content.cjs : discoverGames, resolveProgramContent (exported)
+//   protocol.cjs: pathRequest, success, resultError     (exported)
+//
+// The open is a plain read path: resolve the installed Program content's path, then
+// OpenDataStorageByPath (cmd 206, type 1 = base romfs) on the FS root, GetSize
+// (cmd 4), and reads via attachment.filesystem.readStorage. It does NOT go through
+// openProgramRomfs/copyProgramRegistry (the access-control/pointer-swap path), does
+// not mount exefs, and modifies nothing.
 
 const path = require('node:path');
 
 async function openRomfsStorage({ ounce, run, title, storage, shouldStop = () => false }) {
   const engine = path.join(ounce, 'engine');
   const { attachGame } = require(path.join(engine, 'session.cjs'));
-  const { createGameFiles } = require(path.join(engine, 'mounts.cjs'));
-  const { discoverGames } = require(path.join(engine, 'content.cjs'));
+  const { discoverGames, resolveProgramContent } = require(path.join(engine, 'content.cjs'));
+  const { pathRequest, success } = require(path.join(engine, 'protocol.cjs'));
 
   const attachment = await attachGame(run);
-  let mount;
+  const { s, root, domain, filesystem, service } = attachment;
+  let handle;
   try {
-    // Resolve which storage medium the title lives on if the caller didn't say.
-    let storages = storage != null ? [storage] : null;
+    // Resolve title + candidate storage media from the library if not pinned.
+    let candidates = storage != null ? [storage] : null;
     let resolvedTitle = title;
-    if (!storages || !resolvedTitle) {
+    if (!candidates || !resolvedTitle) {
       const games = await discoverGames({ ...attachment, shouldStop });
-      const game = resolvedTitle
-        ? games.find((g) => g.title === resolvedTitle)
-        : games[0];
+      const game = resolvedTitle ? games.find((g) => g.title === resolvedTitle) : games[0];
       if (!game) throw new Error('title not found in library: ' + (resolvedTitle || '(none given)'));
       resolvedTitle = game.title;
-      storages = storages || game.storages;
+      candidates = candidates || game.storages || [4, 5, 2];
     }
 
-    const files = createGameFiles(attachment);
+    // Resolve the base Program content on the first medium that has it.
+    let source;
     let lastError;
-    for (const medium of storages) {
+    for (const medium of candidates) {
       try {
-        mount = await files.open({ title: resolvedTitle, storage: medium, section: 'romfs' });
+        source = await resolveProgramContent({ s, domain, service, title: resolvedTitle, storage: medium });
         break;
       } catch (error) {
         lastError = error;
       }
     }
-    if (!mount) throw lastError || new Error('could not open romfs for ' + resolvedTitle);
+    if (!source) throw lastError || new Error('could not resolve program content for ' + resolvedTitle);
 
-    const { s, filesystem } = attachment;
+    // OpenDataStorageByPath(root, path=contentPath, {attributes, type:1}) -> storage.
+    const filename = Buffer.alloc(0x301);
+    filename.write(source.contentPath);
+    await s.write(s.base + 0x2000, filename);
+    const input = Buffer.alloc(8);
+    input[0] = source.attributes;
+    input.writeUInt32LE(1, 4); // content type 1 = base romfs
+    let reply;
+    try {
+      reply = success(
+        await domain.send(s, 'OpenDataStorageByPath', root, pathRequest(206, input, s.base + 0x2000)),
+        'OpenDataStorageByPath',
+      );
+    } catch (error) {
+      if (error.nativeResult?.canonical === 0x7d802) {
+        error.message +=
+          '\nThe title key is not registered with FS. Run OunceCake normally once for this ' +
+          'title first (its prepareGame registers the installed license), then retry.';
+      }
+      throw error;
+    }
+    handle = domain.oneHandle(reply);
+
+    const sizeReply = success(await s.ipc('Game storage size', handle, 4), 'Game storage size');
+    const size = Number(sizeReply.data.readBigUInt64LE());
+
     const reader = {
-      size: mount.size,
-      // Mirrors OunceCake's read path exactly; caps are enforced inside readStorage.
-      read: (offset, size) => filesystem.readStorage(s, mount.handle, offset, size),
+      size,
+      // Mirrors OunceCake's read path; per-call caps enforced inside readStorage.
+      read: (offset, length) => filesystem.readStorage(s, handle, offset, length),
     };
 
     return {
       reader,
-      info: { title: resolvedTitle, storage: mount.source?.storage, size: mount.size },
+      info: { title: resolvedTitle, storage: source.storage, size },
       close: async () => {
-        try { await s.close(mount.handle); } finally { await attachment.close(); }
+        try { if (handle != null) await s.close(handle); } finally { await attachment.close(); }
       },
     };
   } catch (error) {
+    try { if (handle != null) await s.close(handle); } catch { /* ignore */ }
     await attachment.close();
     throw error;
   }

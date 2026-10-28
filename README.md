@@ -33,11 +33,15 @@ Stages are implemented one at a time with confirmation between each.
 
 ## Relationship to OunceCake / ns2jb
 
-The console protocol (RPC/session, storage `Read`/`GetSize`, handle location) is
-reused from [ns2jb](https://gitlab.com/kurumuz/ns2jb) and
+The console protocol (RPC/session, storage `Read`/`GetSize`) is reused from
+[ns2jb](https://gitlab.com/kurumuz/ns2jb) and
 [OunceCake](https://github.com/misshexa66/OunceCake). This repo does not reimplement
-the exploit or the handle-location logic; Stage 1 delegates romfs-handle acquisition
-to OunceCake's existing read-only dump opener and only *reads* from the handle.
+the exploit. The Stage 1 opener uses **only OunceCake's published exports**
+(`attachGame`, `discoverGames`/`resolveProgramContent`, `pathRequest`/`success`) and
+reimplements just the read-only base-romfs open (`OpenDataStorageByPath` + `GetSize`
++ `readStorage`) that OunceCake's internal `createGameFiles.open()` performs — so a
+cloned, unmodified OunceCake works as-is, with no patching. It does **not** use
+`openProgramRomfs`/`copyProgramRegistry` (the access-control / pointer-swap path).
 
 ## Stage 1 — usage
 
