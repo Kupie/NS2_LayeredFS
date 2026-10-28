@@ -7,18 +7,54 @@ place of a game's own romfs assets, overlay reads only.
 
 ## Scope and boundaries
 
-This project is **data reads only**. It does not, and will not:
+This project overlays **asset file data only**, read-only, for games you own on a
+console you jailbroke yourself.
 
-- touch exefs or program code,
-- read, parse, modify, or generate NPDM / ACID / ACI access-control or capability data,
-- handle signatures, ticket/keys, or any DRM / content-decryption step,
-- change permissions or escalate privileges,
-- modify original storage (SD or internal) — overrides live on the SD card and
-  originals are never written.
+**Permanently out of scope — never, in any stage:**
 
-If any stage turns out to require any of the above, that stage stops and is flagged
-rather than implemented. You still need your own legally-obtained copy of a game for
-any of this to do anything; nothing here enables piracy or signature bypass.
+- forging, extracting, bypassing, or modifying any **signature, key, or
+  ticket/license** data — or anything that would grant access to content not
+  legitimately owned. No keys or tickets are ever acquired, extracted, persisted, or
+  altered by this project;
+- touching **exefs / `main` / `subsdk*` / any executable code**;
+- **writing** `main.npdm` or any ACI0 / ACID / ACI access-control data;
+- any **persistent** console state change, or any write to original storage (SD or
+  internal) — overrides live on the SD card; originals are never written.
+
+**In scope (read-only, non-persistent):**
+
+- reading a title's romfs and serving SD-card overrides in place of its own assets
+  (the LayeredFS model);
+- to read a title's **composed/patched update romfs** (not just base), two extra
+  read-only, self-restoring console operations, performed via OunceCake's existing,
+  unmodified code:
+  - reading the title's own `main.npdm` and **temporarily registering, then
+    restoring**, its `fah`/`fac` access-control blobs so FS hands back the composed
+    romfs (`fs-context.cjs` `openProgramRomfs` / `openCurrentProgramRomfs`);
+  - triggering the **same legitimate license-presence check the system performs
+    automatically during normal play** — if, and only if, FS does not already have
+    the title's key cached (`program.cjs` `withUpdateLicenses` / `prepareInstalledLicense`
+    via the `es`/eticket service). This asks FS to confirm legitimate entitlement for
+    content you own; **no key or ticket is returned, extracted, persisted, or
+    modified — FS alone evaluates and holds them, exactly as during gameplay.** For a
+    title launched normally with its update installed, this fallback is not even
+    reached (the live program context already has the key).
+
+Everything remains **read-only and non-persistent**: every registration/pointer
+change is undone by the time the handle closes. See the restore-on-close audit note
+below. You still need your own legally-obtained copy of a game; nothing here enables
+piracy, signature bypass, or access to content you do not own.
+
+### Restore-on-close audit (update path)
+
+`memory.write` is a guarded compare-and-write (asserts current == expected before
+writing), and every swap/registration in the update path runs under `withCleanup`,
+whose cleanup runs on success and on error: the temporary program context and patch
+location are removed, pointer swaps are CAS-restored (idempotent; skipped if already
+original), and the program-index map is restored. Nothing is written to NAND/SD.
+**Known limit:** if the RPC session or console dies *mid-operation*, cleanup cannot
+run and those temporary FS registrations / in-RAM pointer swaps persist until the
+next reboot, which clears them fully (nothing persistent is left behind).
 
 ## Build stages
 

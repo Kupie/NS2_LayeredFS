@@ -4,11 +4,13 @@
 // Read(offset, size) a consumer issues against it, read-only. Modifies nothing.
 //
 //   node tools/stage1-probe.cjs --ounce <OunceCake-dir> --run <ns2jb-run-dir> \
-//        [--title <16hex>] [--storage 4|5|2] [--data-samples N] [--json out.jsonl]
+//        [--title <16hex>] [--storage 4|5|2] [--update] [--data-samples N] [--json out.jsonl]
 //
 // --ounce / --run are the same paths OunceCake uses. Without --title the first
 // discovered title is probed. --data-samples issues real head/tail reads for the
 // first N files so the fileData access pattern shows up in the log too.
+// --update opens the title's composed/patched update romfs (base + installed
+// update) instead of the base romfs; see README "Scope and boundaries".
 
 const fs = require('node:fs');
 const { instrument, traverse } = require('../src/read-logger.cjs');
@@ -22,6 +24,7 @@ function parseArgs(argv) {
     else if (a === '--run') opts.run = argv[++i];
     else if (a === '--title') opts.title = argv[++i].replace(/^0x/, '').toLowerCase();
     else if (a === '--storage') opts.storage = Number(argv[++i]);
+    else if (a === '--update') opts.update = true;
     else if (a === '--data-samples') opts.dataSamples = Number(argv[++i]);
     else if (a === '--json') opts.json = argv[++i];
     else throw new Error('unknown option: ' + a);
@@ -38,7 +41,7 @@ async function main() {
   const opened = await openRomfsStorage(opts);
 
   try {
-    console.log(`romfs storage located: title=${opened.info.title} size=${hex(opened.info.size)} (${opened.info.size} bytes)`);
+    console.log(`romfs storage located: title=${opened.info.title} kind=${opened.info.kind} size=${hex(opened.info.size)} (${opened.info.size} bytes)`);
     console.log('logging reads (read-only; storage is not modified)\n');
 
     const io = instrument(opened.reader, {
