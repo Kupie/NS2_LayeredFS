@@ -102,8 +102,11 @@ src/reader.cjs         byte-reader interface {size, read(offset,size)}: buffer- 
 src/read-logger.cjs    Stage 1 read logger (console-agnostic; wraps a read(offset,size))
 src/romfs-merge.cjs    Stage 3 table merge: original romfs union SD overrides -> layout + sources
 src/layered-storage.cjs Stage 3 layered storage: interval-map read router over the sources
+src/npdm.cjs           pure read-only NPDM decoder (Meta/ACI0/ACID), bit tables from Atmosphere
 tools/stage1-probe.cjs Stage 1 CLI
 tools/stage3b-probe.cjs Stage 3b CLI: console open (read-only) + PC-side merge/verify
+tools/npdm-permissions.cjs read-only NPDM permission printer (reads main.npdm, decodes, prints)
+tools/launch-title.cjs remote title launch via the official applet API (no injection/persistence)
 tools/openers/ouncecake-romfs.cjs  read-only handle opener (OunceCake published exports only)
 test/synthetic-romfs.cjs  in-memory romfs builder for PC testing
 test/stage1.test.cjs      PC validation of the logger
@@ -139,10 +142,38 @@ node tools/stage3b-probe.cjs \
 Without `--path` it picks the smallest file (cheap to verify) and prints it. All
 merging and verification happen PC-side; the console is only read.
 
+## Utility tools (NPDM inspection + official launch)
+
+Two standalone tools, same CLI pattern (`--ounce`, `--run`, `--title`, `--update`, `--json`):
+
+- **`tools/npdm-permissions.cjs`** — reads a title's `main.npdm` (the metadata/permission
+  descriptor in the code partition, *not* a code segment), decodes it per the public
+  NPDM layout, and prints Meta / ACI0 Services / ACI0 Syscalls / ACI0 FS Permissions /
+  ACI0 Kernel Capabilities / ACID summary. Read-only: it never verifies or forges a
+  signature and never writes. ACI0 is the actual granted set; ACID is labeled as the
+  declared *maximum*, not what's granted. `--update` decodes the composed update's npdm.
+
+  ```bash
+  node tools/npdm-permissions.cjs --ounce <OunceCake> --run <ns2jb-run> --title <16hex> [--update] [--json]
+  ```
+
+- **`tools/launch-title.cjs`** — launches an already-installed, unmodified title through
+  the **official** OS launch path (the Home Menu path): `appletAE` →
+  `OpenSystemAppletProxy` → `GetApplicationCreator` → `CreateApplication(titleId)` →
+  `IApplicationAccessor::Start`. No exefs read/write, no injection, no persistence;
+  `CreateApplication` takes only the title ID. If the process lacks applet-manager
+  privilege it **stops and reports** — no workaround. `Start` ends the current RPC
+  session (the launcher exits once the target foregrounds); the tool prints this first
+  so it reads as expected, not a hang.
+
+  ```bash
+  node tools/launch-title.cjs --ounce <OunceCake> --run <ns2jb-run> --title <16hex>
+  ```
+
 ## Test
 
 ```bash
-npm test   # Stage 1 logger + Stage 3 merge/layered-storage, all on PC
+npm test   # Stage 1 logger + Stage 3 merge/layered-storage + NPDM decoder, all on PC
 ```
 
 Stage 3's test builds a synthetic original, overlays a larger replacement, a smaller
