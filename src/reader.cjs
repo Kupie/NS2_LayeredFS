@@ -46,4 +46,23 @@ function fileReader(path) {
   };
 }
 
-module.exports = { bufferReader, fileReader };
+// Wrap a reader so no single underlying read exceeds `maxChunk` bytes, while still
+// returning the full requested range. Needed when the backing reader has a per-call
+// transfer cap (the console storage reader caps at 0x40000), since a consumer like
+// LayeredStorage may ask for a larger contiguous range from one source.
+function chunkedReader(reader, maxChunk = 0x40000) {
+  return {
+    size: reader.size,
+    async read(offset, size) {
+      if (size <= maxChunk) return reader.read(offset, size);
+      const out = Buffer.alloc(size);
+      for (let at = 0; at < size; at += maxChunk) {
+        const n = Math.min(maxChunk, size - at);
+        (await reader.read(offset + at, n)).copy(out, at);
+      }
+      return out;
+    },
+  };
+}
+
+module.exports = { bufferReader, fileReader, chunkedReader };

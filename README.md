@@ -67,6 +67,7 @@ src/read-logger.cjs    Stage 1 read logger (console-agnostic; wraps a read(offse
 src/romfs-merge.cjs    Stage 3 table merge: original romfs union SD overrides -> layout + sources
 src/layered-storage.cjs Stage 3 layered storage: interval-map read router over the sources
 tools/stage1-probe.cjs Stage 1 CLI
+tools/stage3b-probe.cjs Stage 3b CLI: console open (read-only) + PC-side merge/verify
 tools/openers/ouncecake-romfs.cjs  read-only handle opener (OunceCake published exports only)
 test/synthetic-romfs.cjs  in-memory romfs builder for PC testing
 test/stage1.test.cjs      PC validation of the logger
@@ -81,6 +82,26 @@ returns a `LayeredStorage` with the standard `{ size, read(offset, size) }`
 interface. Reads are routed per byte-range to generated metadata, the original
 storage, or an override. Because it is just another reader, the Stage 1 traverser
 parses its output — which is how the tests validate it.
+
+## Stage 3b — end-to-end loop closer (console read-only, verify on PC)
+
+Combines the Stage 1 console opener with Stage 3's merge/layered-storage, to prove
+the whole data path against a *real* title before Stage 4 exists. It opens a title's
+romfs read-only (identical access to Stage 1 — no writes, no pointer swaps, nothing
+live), picks one real file, overlays it with a local test file, builds the layered
+image on the PC, re-parses it with the Stage 1 traverser + firmware hash resolver,
+and reports whether the overridden file now has the override's size/bytes and every
+spot-checked file still matches the original.
+
+```bash
+node tools/stage3b-probe.cjs \
+  --ounce /path/to/OunceCake --run /path/to/ns2jb/runs/switch2-XXXXXX \
+  --override ./my-test-asset.bin \
+  [--title 0123456789abcdef] [--storage 4|5|2] [--path /some/real/file] [--spot 3]
+```
+
+Without `--path` it picks the smallest file (cheap to verify) and prints it. All
+merging and verification happen PC-side; the console is only read.
 
 ## Test
 
