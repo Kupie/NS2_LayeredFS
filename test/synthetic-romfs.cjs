@@ -131,18 +131,8 @@ function build(fileMap, { dataAlign = 16 } = {}) {
   return { image, header };
 }
 
-// A Buffer-backed reader matching the {size, read(offset,size)} interface the
-// read-logger and (later) the layered storage expect.
-function bufferReader(buf) {
-  return {
-    size: buf.length,
-    async read(offset, size) {
-      if (offset < 0 || size < 0 || offset + size > buf.length) {
-        throw new Error(`read out of range: ${offset}+${size} > ${buf.length}`);
-      }
-      return Buffer.from(buf.subarray(offset, offset + size));
-    },
-  };
-}
+// bufferReader now lives in src/reader.cjs (one interface for the whole project);
+// re-exported here so existing tests that import it from this module keep working.
+const { bufferReader } = require('../src/reader.cjs');
 
 module.exports = { build, bufferReader };

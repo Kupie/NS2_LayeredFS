@@ -89,6 +89,17 @@ function hashBucketCount(hashTableSize) {
   return Math.floor(hashTableSize / 4);
 }
 
+// Bucket count for a hash table holding `numEntries` entries, matching Atmosphere's
+// GetHashTableSize: 3 if <3; n|1 if <19; else the smallest m >= n divisible by none
+// of {2,3,5,7,11,13,17}. (Inverse direction of hashBucketCount, for building.)
+function hashTableBuckets(numEntries) {
+  if (numEntries < 3) return 3;
+  if (numEntries < 19) return numEntries | 1;
+  let count = numEntries;
+  while ([2, 3, 5, 7, 11, 13, 17].some((d) => count % d === 0)) count++;
+  return count;
+}
+
 // The five regions of a RomFS image, as [start, end) byte ranges, sorted.
 // `header` is the parsed superblock; `imageSize` bounds the final data region.
 //
@@ -127,5 +138,5 @@ function classifyRange(regionList, offset, size) {
 
 module.exports = {
   HEADER_SIZE, NONE, DIR_ENTRY_FIXED, FILE_ENTRY_FIXED, DIR, FILE,
-  readHeader, writeHeader, pathHash, hashBucketCount, regions, classifyRange,
+  readHeader, writeHeader, pathHash, hashBucketCount, hashTableBuckets, regions, classifyRange,
 };

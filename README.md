@@ -62,15 +62,34 @@ closes the handle on exit.
 
 ```
 src/romfs-format.cjs   RomFS on-disk format: struct offsets, path hash, region map (pure data)
+src/reader.cjs         byte-reader interface {size, read(offset,size)}: buffer- and file-backed
 src/read-logger.cjs    Stage 1 read logger (console-agnostic; wraps a read(offset,size))
+src/romfs-merge.cjs    Stage 3 table merge: original romfs union SD overrides -> layout + sources
+src/layered-storage.cjs Stage 3 layered storage: interval-map read router over the sources
 tools/stage1-probe.cjs Stage 1 CLI
-tools/openers/ouncecake-romfs.cjs  read-only handle opener delegated to OunceCake
+tools/openers/ouncecake-romfs.cjs  read-only handle opener (OunceCake published exports only)
 test/synthetic-romfs.cjs  in-memory romfs builder for PC testing
-test/stage1.test.cjs      PC validation of the logger (npm test)
+test/stage1.test.cjs      PC validation of the logger
+test/stage3.test.cjs      PC validation of merge + layered storage
 ```
+
+## Stage 3 — layered storage (PC, no console)
+
+`buildLayeredStorage(originalReader, overrides)` parses the original romfs, overlays
+the overrides (a map of romfs path -> reader or Buffer; override wins by path), and
+returns a `LayeredStorage` with the standard `{ size, read(offset, size) }`
+interface. Reads are routed per byte-range to generated metadata, the original
+storage, or an override. Because it is just another reader, the Stage 1 traverser
+parses its output — which is how the tests validate it.
 
 ## Test
 
 ```bash
-npm test   # builds a synthetic romfs and validates the Stage 1 logger on PC
+npm test   # Stage 1 logger + Stage 3 merge/layered-storage, all on PC
 ```
+
+Stage 3's test builds a synthetic original, overlays a larger replacement, a smaller
+replacement, and brand-new files/dirs, then re-parses the layered image with the
+Stage 1 traverser (the oracle) and checks: merged listing + sizes, override vs.
+untouched bytes, boundary-spanning reads, `GetSize`, and that every file resolves
+through the hash tables the way the firmware looks paths up.

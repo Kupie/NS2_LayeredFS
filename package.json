@@ -5,6 +5,6 @@
   "description": "Read-only romfs asset-override (LayeredFS) layer for personal Switch 2 game modding",
   "license": "GPL-2.0-only",
   "scripts": {
-    "test": "node test/stage1.test.cjs"
+    "test": "node test/stage1.test.cjs && node test/stage3.test.cjs"
   }
 }
