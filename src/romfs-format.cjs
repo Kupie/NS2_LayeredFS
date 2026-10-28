@@ -91,14 +91,25 @@ function hashBucketCount(hashTableSize) {
 
 // The five regions of a RomFS image, as [start, end) byte ranges, sorted.
 // `header` is the parsed superblock; `imageSize` bounds the final data region.
+//
+// The four metadata tables are placed either entirely before or entirely after the
+// file-data blob (real Switch images put them at the end). So the file-data region
+// does not run all the way to imageSize when tables follow it: it ends at the first
+// metadata table that starts after fileDataOffset. Getting this boundary exact
+// matters -- Stages 2/3 use it to decide, per byte range, original vs. override.
 function regions(header, imageSize) {
-  const list = [
-    { name: 'header', start: 0, end: HEADER_SIZE },
+  const meta = [
     { name: 'dirHashTable', start: header.dirHashTableOffset, end: header.dirHashTableOffset + header.dirHashTableSize },
     { name: 'dirMetaTable', start: header.dirMetaTableOffset, end: header.dirMetaTableOffset + header.dirMetaTableSize },
     { name: 'fileHashTable', start: header.fileHashTableOffset, end: header.fileHashTableOffset + header.fileHashTableSize },
     { name: 'fileMetaTable', start: header.fileMetaTableOffset, end: header.fileMetaTableOffset + header.fileMetaTableSize },
-    { name: 'fileData', start: header.fileDataOffset, end: imageSize },
+  ];
+  const tablesAfter = meta.map((m) => m.start).filter((s) => s > header.fileDataOffset);
+  const fileDataEnd = tablesAfter.length ? Math.min(...tablesAfter) : imageSize;
+  const list = [
+    { name: 'header', start: 0, end: HEADER_SIZE },
+    ...meta,
+    { name: 'fileData', start: header.fileDataOffset, end: fileDataEnd },
   ];
   return list.sort((a, b) => a.start - b.start);
 }

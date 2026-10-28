@@ -36,8 +36,6 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
 
   const opened = await openRomfsStorage(opts);
-  let out = null;
-  if (opts.json) out = fs.createWriteStream(opts.json);
 
   try {
     console.log(`romfs storage located: title=${opened.info.title} size=${hex(opened.info.size)} (${opened.info.size} bytes)`);
@@ -45,13 +43,19 @@ async function main() {
 
     const io = instrument(opened.reader, {
       onRead(e) {
-        const regions = (e.regions || ['?']).join('+');
+        // regions on read #0 (the header) aren't known yet; they are backfilled by
+        // setRegions and shown in the summary / JSONL below.
+        const regions = (e.regions || ['(pending)']).join('+');
         console.log(`#${String(e.seq).padStart(4)}  Read(off=${hex(e.offset).padStart(10)}, size=${hex(e.size).padStart(8)})  [${regions}]`);
-        if (out) out.write(JSON.stringify(e) + '\n');
       },
     });
 
     const result = await traverse(io, { dataSamples: opts.dataSamples });
+
+    // Write the JSONL from the final log so every entry (incl. read #0) is annotated.
+    if (opts.json) {
+      fs.writeFileSync(opts.json, io.log.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    }
 
     console.log('\n--- summary ---');
     console.log(`entries: ${result.dirCount} dirs, ${result.fileCount} files`);
@@ -64,7 +68,6 @@ async function main() {
     const h = result.header;
     for (const [k, v] of Object.entries(h)) console.log(`  ${k.padEnd(20)} ${hex(v)}`);
   } finally {
-    if (out) out.end();
     await opened.close();
     console.log('\nstorage handle closed; nothing was modified.');
   }

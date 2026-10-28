@@ -5,7 +5,34 @@
 
 const assert = require('node:assert');
 const { instrument, traverse } = require('../src/read-logger.cjs');
+const fmt = require('../src/romfs-format.cjs');
 const { build, bufferReader } = require('./synthetic-romfs.cjs');
+
+// Regression: on real Switch images the metadata tables sit AFTER the file-data
+// blob. The file-data region must end at the first table, not at imageSize, or
+// every table read is mis-tagged as also hitting fileData. Numbers below are from
+// a real title (probe output): fileDataOffset=0x200, tables contiguous at the end.
+function testTablesAfterData() {
+  const header = {
+    headerSize: 0x50,
+    dirHashTableOffset: 0x4dae37bf8, dirHashTableSize: 0x224,
+    dirMetaTableOffset: 0x4dae37e1c, dirMetaTableSize: 0x1574,
+    fileHashTableOffset: 0x4dae39390, fileHashTableSize: 0x254,
+    fileMetaTableOffset: 0x4dae395e4, fileMetaTableSize: 0x1ef8,
+    fileDataOffset: 0x200,
+  };
+  const imageSize = 0x4dae3b4dc;
+  const regionList = fmt.regions(header, imageSize);
+
+  const fileData = regionList.find((r) => r.name === 'fileData');
+  assert.strictEqual(fileData.end, 0x4dae37bf8, 'fileData must end at the first trailing table');
+
+  // A read fully inside the dir meta table is tagged ONLY dirMetaTable.
+  assert.deepStrictEqual(fmt.classifyRange(regionList, 0x4dae37e1c, 0x1574), ['dirMetaTable']);
+  // A read inside the data blob is tagged ONLY fileData.
+  assert.deepStrictEqual(fmt.classifyRange(regionList, 0x200, 0x1000), ['fileData']);
+  console.log('ok - tables-after-data layout classified correctly');
+}
 
 async function run() {
   const files = {
@@ -48,6 +75,8 @@ async function run() {
 
   console.log(`ok - ${io.stats.reads} reads, ${io.stats.bytes} bytes`);
   console.log('ok - regions observed:', [...regionsSeen].join(', '));
+
+  testTablesAfterData();
   console.log('stage1 test passed');
 }
 
